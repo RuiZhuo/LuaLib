@@ -658,7 +658,7 @@ LUA_API void lua_settable (lua_State *L, int idx) {
 	//从栈中取出对应的table
   t = index2adr(L, idx);
   api_checkvalidindex(L, t);
-	//取出栈顶的2个值做为key和值，这里为什么是栈顶-1呢，因为top是指向内存块的末尾地址。
+	//取出栈顶的2个值做为key和值，这里为什么是栈顶-1呢，因为top是指向内存块的末尾地址。即top指向栈顶的第一个空元素
   luaV_settable(L, t, L->top - 2, L->top - 1);
   L->top -= 2;  /* pop index and value */
   lua_unlock(L);
@@ -980,7 +980,8 @@ LUA_API int lua_error (lua_State *L) {
   return 0;  /* to avoid warnings */
 }
 
-
+//通过栈顶元素做为key，找到下一个key，和value
+//所以第一次key为什么为nil，是为了取第一个key，并赋值
 LUA_API int lua_next (lua_State *L, int idx) {
   StkId t;
   int more;
@@ -989,6 +990,7 @@ LUA_API int lua_next (lua_State *L, int idx) {
   api_check(L, ttistable(t));
   more = luaH_next(L, hvalue(t), L->top - 1);
   if (more) {
+		//因为把value压入栈，所以栈顶要+1
     api_incr_top(L);
   }
   else  /* no more elements */

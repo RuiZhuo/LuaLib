@@ -98,6 +98,7 @@ static Node *hashnum (const Table *t, lua_Number n) {
 /*
 ** returns the `main' position of an element in a table (that is, the index
 ** of its hash value)
+ 通过key在hash表中，找到对应位置的值
 */
 static Node *mainposition (const Table *t, const TValue *key) {
   switch (ttype(key)) {
@@ -118,6 +119,7 @@ static Node *mainposition (const Table *t, const TValue *key) {
 /*
 ** returns the index for `key' if `key' is an appropriate key to live in
 ** the array part of the table, -1 otherwise.
+ 实际上是判断这个key是否为整数
 */
 static int arrayindex (const TValue *key) {
   if (ttisnumber(key)) {
@@ -135,13 +137,16 @@ static int arrayindex (const TValue *key) {
 ** returns the index of a `key' for table traversals. First goes all
 ** elements in the array part, then elements in the hash part. The
 ** beginning of a traversal is signalled by -1.
+ 返回key的位置下标
 */
 static int findindex (lua_State *L, Table *t, StkId key) {
   int i;
-  if (ttisnil(key)) return -1;  /* first iteration */
+  if (ttisnil(key)) return -1;  /* first iteration 没错，第一次遍历的情况，因为key初始为nil*/
   i = arrayindex(key);
+  //在array里的情况
   if (0 < i && i <= t->sizearray)  /* is `key' inside array part? */
     return i-1;  /* yes; that's the index (corrected to C) */
+  //在hash表里的情况
   else {
     Node *n = mainposition(t, key);
     do {  /* check whether `key' is somewhere in the chain */
@@ -149,8 +154,10 @@ static int findindex (lua_State *L, Table *t, StkId key) {
       if (luaO_rawequalObj(key2tval(n), key) ||
             (ttype(gkey(n)) == LUA_TDEADKEY && iscollectable(key) &&
              gcvalue(gkey(n)) == gcvalue(key))) {
+        //计算key在hash表里的位置
         i = cast_int(n - gnode(t, 0));  /* key index in hash table */
         /* hash elements are numbered after array ones */
+        //这里为什么要加上数组的长度呢？因为，在luaH_next里，是先遍历数组，在遍历hash的。
         return i + t->sizearray;
       }
       else n = gnext(n);
@@ -160,16 +167,21 @@ static int findindex (lua_State *L, Table *t, StkId key) {
   }
 }
 
-
+//寻找当前key的下一个nkey，把nkey赋值给当前key，并把nkey对应的value压栈
 int luaH_next (lua_State *L, Table *t, StkId key) {
   int i = findindex(L, t, key);  /* find original element */
+  //就是这个细节i++没注意，在这里停留了很久。
+  //i++，即会从下一个key值开始遍历，因为有可能是空的，所以需要遍历。
   for (i++; i < t->sizearray; i++) {  /* try first array part */
     if (!ttisnil(&t->array[i])) {  /* a non-nil value? */
       setnvalue(key, cast_num(i+1));
+      //在栈里面，value赋值给栈顶的空位置，即L->top = &t->array[i]
+      //在后面会执行L->top++的。
       setobj2s(L, key+1, &t->array[i]);
       return 1;
     }
   }
+  //i - t->sizearray,求出hash的真正位置
   for (i -= t->sizearray; i < sizenode(t); i++) {  /* then hash part */
     if (!ttisnil(gval(gnode(t, i)))) {  /* a non-nil value? */
       setobj2s(L, key, key2tval(gnode(t, i)));
@@ -209,10 +221,14 @@ static int computesizes (int nums[], int *narray) {
   return na;
 }
 
-
+/*
+ 累计在hash表里的整数key
+*/
 static int countint (const TValue *key, int *nums) {
+  //获取当前key值
   int k = arrayindex(key);
   if (0 < k && k <= MAXASIZE) {  /* is `key' an appropriate array index? */
+    //计算这个k在哪个区间，并进行累计
     nums[ceillog2(k)]++;  /* count as such */
     return 1;
   }
@@ -220,11 +236,14 @@ static int countint (const TValue *key, int *nums) {
     return 0;
 }
 
-
+//统计2的n次方区间内有多少个不为nil的个数，存放到nums
+//例如nums[1]存放2^1到2^2次方有多少个不为nil的，即统计&t->array[0]到&t->array[3]
+//   nums[2]存放2^2到2^3次方有多少个不为nil的，即统计&t->array[4]到&t->array[7]
+//放回所有不为nil的个数
 static int numusearray (const Table *t, int *nums) {
   int lg;
   int ttlg;  /* 2^lg */
-  int ause = 0;  /* summation of `nums' */
+  int ause = 0;  /* summation of `nums' 统计所有不为nil的个数*/
   int i = 1;  /* count to traverse all array keys */
   for (lg=0, ttlg=1; lg<=MAXBITS; lg++, ttlg*=2) {  /* for each slice */
     int lc = 0;  /* counter */
@@ -235,20 +254,24 @@ static int numusearray (const Table *t, int *nums) {
         break;  /* no more elements to count */
     }
     /* count elements in range (2^(lg-1), 2^lg] */
+    //统计2的(n - 1)次方到2的n次方的区间里，有多少个值
     for (; i <= lim; i++) {
       if (!ttisnil(&t->array[i-1]))
         lc++;
     }
+    //存放在当前区间
     nums[lg] += lc;
     ause += lc;
   }
   return ause;
 }
 
-
+/*
+ 统计在hash表里，以整数为key的个数，并按2^(n - 1)到2^n区间进行统计
+*/
 static int numusehash (const Table *t, int *nums, int *pnasize) {
-  int totaluse = 0;  /* total number of elements */
-  int ause = 0;  /* summation of `nums' */
+  int totaluse = 0;  /* total number of elements 统计所有整数key，用于返回*/
+  int ause = 0;  /* summation of `nums' 统计所有整数key，并与pnasize累加*/
   int i = sizenode(t);
   while (i--) {
     Node *n = &t->node[i];

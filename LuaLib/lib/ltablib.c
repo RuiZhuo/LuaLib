@@ -39,7 +39,8 @@ static int foreachi (lua_State *L) {
 static int foreach (lua_State *L) {
   luaL_checktype(L, 1, LUA_TTABLE);
   luaL_checktype(L, 2, LUA_TFUNCTION);
-  lua_pushnil(L);  /* first key */
+  lua_pushnil(L);  /* first key 这里把nil作为初试key，会用作存储第一个key*/
+  //每遍历一遍，一定是当前key在栈顶。
   while (lua_next(L, 1)) {
     lua_pushvalue(L, 2);  /* function */
     lua_pushvalue(L, -3);  /* key */
@@ -47,7 +48,7 @@ static int foreach (lua_State *L) {
     lua_call(L, 2, 1);
     if (!lua_isnil(L, -1))
       return 1;
-    lua_pop(L, 2);  /* remove value and result */
+    lua_pop(L, 2);  /* remove value and result 这里弹出函数调用的放回个数，和数组值，即栈顶为当前key */
   }
   return 0;
 }

@@ -100,7 +100,7 @@ typedef struct global_State {
 struct lua_State {
   CommonHeader;
   lu_byte status;
-  StkId top;  /* first free slot in the stack */
+  StkId top;  /* first free slot in the stack top指向栈顶的第一个空元素 */
   StkId base;  /* base of current function */
   global_State *l_G;
   CallInfo *ci;  /* call info for current function */
