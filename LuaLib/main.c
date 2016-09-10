@@ -6,11 +6,25 @@
 //  Copyright © 2016年 卓锐. All rights reserved.
 //
 
+
 #include <stdio.h>
 #include "lua.h"
 #include "lauxlib.h"
 #include "lualib.h"
+
+//#include "lapi.h"
+#include "ldebug.h"
+#include "ldo.h"
+#include "lfunc.h"
+#include "lgc.h"
+#include "lmem.h"
 #include "lobject.h"
+#include "lstate.h"
+#include "lstring.h"
+#include "ltable.h"
+#include "ltm.h"
+#include "lundump.h"
+#include "lvm.h"
 
 int toLuaSum(lua_State *L){
     if (lua_type(L, 1) == LUA_TNUMBER && lua_type(L, 2) == LUA_TNUMBER) {
@@ -81,14 +95,91 @@ void stackDump(lua_State* L){
     printf("\nend dump lua stack");
 }
 
+LUA_API void tableSizeInfo (lua_State *L, int idx) {
+    TValue * t;
+    lua_lock(L);
+    //从栈中取出对应的table
+    t = L->top - 1;
+    Table *table = hvalue(t);
+    printf("\nsizearray %d", table->sizearray);
+    printf("\nlsizenode %d", table->lsizenode);
+    
+    lua_unlock(L);
+}
+
 void luaTableTest(){
     lua_State *L = luaL_newstate();
     lua_newtable(L);
+    
+    lua_pushnumber(L, 1);
+    lua_pushnumber(L, 123);
+    stackDump(L);
+    lua_settable(L, -3);
+    tableSizeInfo(L, 1);
+    
+    lua_pushnumber(L, 2);
+    lua_pushnumber(L, 123);
+    stackDump(L);
+    lua_settable(L, -3);
+    tableSizeInfo(L, 1);
+    
+    
     lua_pushstring(L, "key1");
     lua_pushnumber(L, 123);
     stackDump(L);
     lua_settable(L, -3);
+    tableSizeInfo(L, 1);
+    
+    lua_pushstring(L, "key2");
+    lua_pushnumber(L, 123);
     stackDump(L);
+    lua_settable(L, -3);
+    tableSizeInfo(L, 1);
+
+    lua_pushstring(L, "key3");
+    lua_pushnumber(L, 123);
+    stackDump(L);
+    lua_settable(L, -3);
+    tableSizeInfo(L, 1);
+
+    lua_pushstring(L, "key4");
+    lua_pushnumber(L, 123);
+    stackDump(L);
+    lua_settable(L, -3);
+    tableSizeInfo(L, 1);
+
+    lua_pushstring(L, "key5");
+    lua_pushnumber(L, 123);
+    stackDump(L);
+    lua_settable(L, -3);
+    tableSizeInfo(L, 1);
+    
+    lua_pushnumber(L, 3);
+    lua_pushnumber(L, 123);
+    stackDump(L);
+    lua_settable(L, -3);
+    tableSizeInfo(L, 1);
+    
+    lua_pushnumber(L, 4);
+    lua_pushnumber(L, 123);
+    stackDump(L);
+    lua_settable(L, -3);
+    tableSizeInfo(L, 1);
+    
+    lua_pushnumber(L, 5);
+    lua_pushnumber(L, 123);
+    stackDump(L);
+    lua_settable(L, -3);
+    tableSizeInfo(L, 1);
+    
+    lua_pushnumber(L, 6);
+    lua_pushnumber(L, 123);
+    stackDump(L);
+    lua_settable(L, -3);
+    tableSizeInfo(L, 1);
+
+    stackDump(L);
+    
 }
 
 int main(int argc, const char * argv[]) {

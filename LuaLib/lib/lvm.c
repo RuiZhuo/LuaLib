@@ -141,7 +141,7 @@ void luaV_settable (lua_State *L, const TValue *t, TValue *key, StkId val) {
     const TValue *tm;
     if (ttistable(t)) {  /* `t' is a table? */
       Table *h = hvalue(t);
-      //判断这个key有没有值，如果没有创建一个新node
+      //判断这个key是否存在，如果没有创建一个
       TValue *oldval = luaH_set(L, h, key); /* do a primitive set */
       //如果是已有的node会通过第一个条件,如果是新的node，判断是否有元表
       //也就是说，不会执行里面的判断只有一种可能，就是有_newindex这个元表

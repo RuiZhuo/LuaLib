@@ -39,16 +39,16 @@ static int foreachi (lua_State *L) {
 static int foreach (lua_State *L) {
   luaL_checktype(L, 1, LUA_TTABLE);
   luaL_checktype(L, 2, LUA_TFUNCTION);
-  lua_pushnil(L);  /* first key 这里把nil作为初试key，会用作存储第一个key*/
+  lua_pushnil(L);  /* first key 这里把nil作为初始key，会用作存储第一个key*/
   //每遍历一遍，一定是当前key在栈顶。
   while (lua_next(L, 1)) {
     lua_pushvalue(L, 2);  /* function */
-    lua_pushvalue(L, -3);  /* key */
-    lua_pushvalue(L, -3);  /* value */
-    lua_call(L, 2, 1);
+    lua_pushvalue(L, -3);  /* key 现在栈顶的位置关系为，function,value,key,所以key现在在栈顶的第三位置 */
+    lua_pushvalue(L, -3);  /* value 现在栈顶的位置关系为，key,function,value,key,所以value还是在栈顶的第三位置*/
+    lua_call(L, 2, 1);    /* 执行完function以后，栈顶的位置关系为，return,value,key*/
     if (!lua_isnil(L, -1))
       return 1;
-    lua_pop(L, 2);  /* remove value and result 这里弹出函数调用的放回个数，和数组值，即栈顶为当前key */
+    lua_pop(L, 2);  /* remove value and result 这里弹出函数调用的返回值，和value，即栈顶为当前key */
   }
   return 0;
 }

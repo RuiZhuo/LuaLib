@@ -171,17 +171,17 @@ static int findindex (lua_State *L, Table *t, StkId key) {
 int luaH_next (lua_State *L, Table *t, StkId key) {
   int i = findindex(L, t, key);  /* find original element */
   //就是这个细节i++没注意，在这里停留了很久。
-  //i++，即会从下一个key值开始遍历，因为有可能是空的，所以需要遍历。
+  //i++，即会从下一个key值开始遍历，因为有可能是空的，所以需要遍历到不为空为止。
   for (i++; i < t->sizearray; i++) {  /* try first array part */
     if (!ttisnil(&t->array[i])) {  /* a non-nil value? */
       setnvalue(key, cast_num(i+1));
       //在栈里面，value赋值给栈顶的空位置，即L->top = &t->array[i]
-      //在后面会执行L->top++的。
+      //在函数外面会执行L->top++的。
       setobj2s(L, key+1, &t->array[i]);
       return 1;
     }
   }
-  //i - t->sizearray,求出hash的真正位置
+  //i - t->sizearray,求出hash下标的真正位置
   for (i -= t->sizearray; i < sizenode(t); i++) {  /* then hash part */
     if (!ttisnil(gval(gnode(t, i)))) {  /* a non-nil value? */
       setobj2s(L, key, key2tval(gnode(t, i)));
@@ -199,7 +199,16 @@ int luaH_next (lua_State *L, Table *t, StkId key) {
 ** ==============================================================
 */
 
-
+/*
+ 重新计算数组大小，*narray记录数组大小，返回na为实际存在数组的个数
+ 算法说明：当前1到2^n次方区间内的不为nil的个数必须满足大于2^n / 2，否则只能2^(n - x)来存，然后下标超出的部分用hash表存。
+ 例如：
+ a[0] = 1, 数组大小1,hash大小0
+ a[0] = 1, a[1] = 1，数组大小2, hash大小0
+ a[0] = 1, a[1] = 1, a[5] = 1, 数组大小4, hash大小1，a[5]本来是在8这个区间里的，但是有用个数3 < 8 / 2，所以a[5]放在了hash表里
+ a[0] = 1, a[1] = 1, a[5] = 1, a[6] = 1, 数组大小4，hash大小2,有用个数4 < 8 / 2，所以a[5],a[6]放在hash表里
+ a[0] = 1, a[1] = 1, a[5] = 1, a[6] = 1, a[7] = 1，数组大小8，hash大小0, 有用个数5 > 8 / 2
+*/
 static int computesizes (int nums[], int *narray) {
   int i;
   int twotoi;  /* 2^i */
@@ -237,7 +246,9 @@ static int countint (const TValue *key, int *nums) {
 }
 
 //统计2的n次方区间内有多少个不为nil的个数，存放到nums
-//例如nums[1]存放2^1到2^2次方有多少个不为nil的，即统计&t->array[0]到&t->array[3]
+//例如
+//   nums[0]存放2^0，即统计&t->array[0]
+//   nums[1]存放2^1到2^2次方有多少个不为nil的，即统计&t->array[1]到&t->array[3]
 //   nums[2]存放2^2到2^3次方有多少个不为nil的，即统计&t->array[4]到&t->array[7]
 //放回所有不为nil的个数
 static int numusearray (const Table *t, int *nums) {
@@ -267,10 +278,10 @@ static int numusearray (const Table *t, int *nums) {
 }
 
 /*
- 统计在hash表里，以整数为key的个数，并按2^(n - 1)到2^n区间进行统计
+ 统计在hash表里，以整数为key的个数，并按2^(n - 1)到2^n区间进行统计，并返还所有有值的node个数
 */
 static int numusehash (const Table *t, int *nums, int *pnasize) {
-  int totaluse = 0;  /* total number of elements 统计所有整数key，用于返回*/
+  int totaluse = 0;  /* total number of elements 统计所有已存在的键，用于返回*/
   int ause = 0;  /* summation of `nums' 统计所有整数key，并与pnasize累加*/
   int i = sizenode(t);
   while (i--) {
@@ -308,6 +319,7 @@ static void setnodevector (lua_State *L, Table *t, int size) {
   }
   else {
     int i;
+    //实际大小转化为指数形式
     lsize = ceillog2(size);
     if (lsize > MAXBITS)
       luaG_runerror(L, "table overflow");
@@ -327,32 +339,35 @@ static void setnodevector (lua_State *L, Table *t, int size) {
   t->lastfree = gnode(t, size);  /* all positions are free */
 }
 
-
+/*
+ 重新分配数组和hash表空间
+*/
 static void resize (lua_State *L, Table *t, int nasize, int nhsize) {
   int i;
   int oldasize = t->sizearray;
   int oldhsize = t->lsizenode;
-  Node *nold = t->node;  /* save old hash ... */
-  if (nasize > oldasize)  /* array part must grow? */
+  Node *nold = t->node;  /* save old hash ... 保存当前的hash表，用于后面创建新hash表时，可以重新对各个node赋值*/
+  if (nasize > oldasize)  /* array part must grow? 需要扩展数组*/
     setarrayvector(L, t, nasize);
-  /* create new hash part with appropriate size */
+  /* create new hash part with appropriate size 重新分配hash空间*/
   setnodevector(L, t, nhsize);  
   if (nasize < oldasize) {  /* array part must shrink? */
     t->sizearray = nasize;
-    /* re-insert elements from vanishing slice */
+    /* re-insert elements from vanishing slice 超出部分存放到hash表里*/
     for (i=nasize; i<oldasize; i++) {
       if (!ttisnil(&t->array[i]))
         setobjt2t(L, luaH_setnum(L, t, i+1), &t->array[i]);
     }
-    /* shrink array */
+    /* shrink array 重新分配数组空间，去掉后面溢出部分*/
     luaM_reallocvector(L, t->array, oldasize, nasize, TValue);
   }
-  /* re-insert elements from hash part */
-  for (i = twoto(oldhsize) - 1; i >= 0; i--) {
+  /* re-insert elements from hash part 从后到前遍历，把老hash表的值搬到新表中*/
+  for (i = twoto(oldhsize) - 1; i  >= 0; i--) {
     Node *old = nold+i;
     if (!ttisnil(gval(old)))
       setobjt2t(L, luaH_set(L, t, key2tval(old)), gval(old));
   }
+  //释放老hash表空间
   if (nold != dummynode)
     luaM_freearray(L, nold, twoto(oldhsize), Node);  /* free old array */
 }
@@ -363,22 +378,24 @@ void luaH_resizearray (lua_State *L, Table *t, int nasize) {
   resize(L, t, nasize, nsize);
 }
 
-
+//加入key，重新分配hash与array的空间
 static void rehash (lua_State *L, Table *t, const TValue *ek) {
-  int nasize, na;
-  int nums[MAXBITS+1];  /* nums[i] = number of keys between 2^(i-1) and 2^i */
+  int nasize, na;//nasize前期累计整数key个数，后期做为数组空间大小，na表示数组不为nil的个数
+  int nums[MAXBITS+1];  /* nums[i] = number of keys between 2^(i-1) and 2^i 累计各个区间整数key不为nil的个数，包括hash*/
   int i;
-  int totaluse;
-  for (i=0; i<=MAXBITS; i++) nums[i] = 0;  /* reset counts */
-  nasize = numusearray(t, nums);  /* count keys in array part */
+  int totaluse;//记录所有已存在的键，包括hash和array
+  for (i=0; i<=MAXBITS; i++) nums[i] = 0;  /* reset counts 初始化所有计数区间*/
+  nasize = numusearray(t, nums);  /* count keys in array part 以区间统计数组里不为nil的个数，并获得总数*/
   totaluse = nasize;  /* all those keys are integer keys */
-  totaluse += numusehash(t, nums, &nasize);  /* count keys in hash part */
+  totaluse += numusehash(t, nums, &nasize);  /* count keys in hash part 统计hash表里已有的键，以及整数键的个数已经区间分布*/
   /* count extra key */
+  //如果新key是整数类型的情况
   nasize += countint(ek, nums);
+  //累计新key
   totaluse++;
-  /* compute new size for array part */
+  /* compute new size for array part 重新计算数组空间*/
   na = computesizes(nums, &nasize);
-  /* resize the table to new computed sizes */
+  /* resize the table to new computed sizes 重新创建内存空间, nasize为新数组大小，totaluse - na表示所有键的个数减去新数组的个数，即为新hash表需要存放的个数 */
   resize(L, t, nasize, totaluse - na);
 }
 
@@ -407,7 +424,9 @@ Table *luaH_new (lua_State *L, int narray, int nhash) {
   return t;
 }
 
-
+/*
+ 释放数组与hash表空间
+*/
 void luaH_free (lua_State *L, Table *t) {
   if (t->node != dummynode)
     luaM_freearray(L, t->node, sizenode(t), Node);
@@ -415,7 +434,10 @@ void luaH_free (lua_State *L, Table *t) {
   luaM_free(L, t);
 }
 
-
+/*
+ 在hash表里，获得可用的node。
+ 设计中，把hash表里，lastfree指针指向最后一个可用的位置。
+*/
 static Node *getfreepos (Table *t) {
   while (t->lastfree-- > t->node) {
     if (ttisnil(gkey(t->lastfree)))
@@ -435,8 +457,7 @@ static Node *getfreepos (Table *t) {
 */
 static TValue *newkey (lua_State *L, Table *t, const TValue *key) {
   Node *mp = mainposition(t, key);
-  //两种情况，主键有值的情况很好理解。另一种，是t->node没有分配空间的情况。
-  //因为如果有空间的情况，无论主键上有没有值，都会返回一个有内存空间的node，而不是一个dummynode
+  //两种情况，主键有值的情况很好理解。另一种，是t->node没有分配空间的情况，即第一次插入的情况。
   if (!ttisnil(gval(mp)) || mp == dummynode) {
     Node *othern;
     Node *n = getfreepos(t);  /* get a free place */
@@ -546,7 +567,8 @@ const TValue *luaH_get (Table *t, const TValue *key) {
 }
 
 /*
- 通过key获得对应的值，如果没有则创建新的值
+ 通过key获得对应的值，如果没有次key，则创建新key，存放在相应的node中。
+ 返回此key对应的value，如果是新key,则为nil
 */
 TValue *luaH_set (lua_State *L, Table *t, const TValue *key) {
   const TValue *p = luaH_get(t, key);
@@ -561,7 +583,9 @@ TValue *luaH_set (lua_State *L, Table *t, const TValue *key) {
   }
 }
 
-
+/*
+ 与TValue *luaH_set功能一样，只是设置的是整数key
+*/
 TValue *luaH_setnum (lua_State *L, Table *t, int key) {
   const TValue *p = luaH_getnum(t, key);
   if (p != luaO_nilobject)
@@ -573,7 +597,9 @@ TValue *luaH_setnum (lua_State *L, Table *t, int key) {
   }
 }
 
-
+/*
+ 与TValue *luaH_set功能类似
+ */
 TValue *luaH_setstr (lua_State *L, Table *t, TString *key) {
   const TValue *p = luaH_getstr(t, key);
   if (p != luaO_nilobject)
@@ -613,6 +639,7 @@ static int unbound_search (Table *t, unsigned int j) {
 /*
 ** Try to find a boundary in table `t'. A `boundary' is an integer index
 ** such that t[i] is non-nil and t[i+1] is nil (and 0 if t[1] is nil).
+ 如果array有值，返回最大的key。所以table.getn这个只能统计连续的数组。
 */
 int luaH_getn (Table *t) {
   unsigned int j = t->sizearray;
